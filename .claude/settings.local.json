@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mv /Users/nguyen_bao/Documents/AI_Project/Exfiltration/MachineLearningCVE/*.csv /Users/nguyen_bao/Documents/AI_Project/Exfiltration/data/raw/)",
+      "Bash(mv /Users/nguyen_bao/Documents/AI_Project/Exfiltration/TrafficLabelling/*.csv /Users/nguyen_bao/Documents/AI_Project/Exfiltration/data/raw/)",
+      "Bash(mv \"/Users/nguyen_bao/Documents/AI_Project/Exfiltration/TrafficLabelling \"/* \"/Users/nguyen_bao/Documents/AI_Project/Exfiltration/data/raw/CICIDS2017_TrafficLabelling_Original/\")",
+      "Bash(rmdir \"/Users/nguyen_bao/Documents/AI_Project/Exfiltration/TrafficLabelling \")",
+      "Bash(conda --version)",
+      "Bash(conda create:*)",
+      "Bash(conda run:*)",
+      "Bash(/opt/miniconda3/envs/exfil/bin/python -c \"import scapy, pandas, sklearn, tensorflow; print\\('✅ All core packages OK'\\)\")",
+      "Bash(/opt/miniconda3/envs/exfil/bin/python -m ipykernel install --user --name=exfil --display-name=\"Python \\(exfil\\)\" 2>&1)",
+      "Bash(/opt/miniconda3/envs/exfil/bin/pip --version)",
+      "Bash(/opt/miniconda3/envs/exfil/bin/python --version)",
+      "Bash(/opt/miniconda3/envs/exfil/bin/python -c \"import sys; print\\(sys.path\\)\")",
+      "Bash(/opt/miniconda3/envs/exfil/bin/pip show:*)",
+      "Bash(pip list:*)",
+      "Bash(/opt/miniconda3/bin/python -c \"import scapy, pandas; print\\(''''OK''''\\)\")",
+      "Bash(/opt/miniconda3/envs/exfil/bin/pip install:*)",
+      "Bash(/opt/miniconda3/envs/exfil/bin/python -c \"import scapy, pandas, sklearn, tensorflow, numpy; print\\('✅ All packages verified OK'\\)\")",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}

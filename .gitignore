@@ -1,0 +1,54 @@
+# ─── Python ────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.so
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+
+ARCHITECTURE.md 
+CLAUDE.md
+PROGRESS.md
+topic.md
+# ─── Jupyter ────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ─── Trained Models & Scalers ───────────────────────────────────────────
+models/*.pkl
+models/*.h5
+models/*.keras
+
+# ─── Processed Data ─────────────────────────────────────────────────────
+data/processed/*.csv
+data/processed/*.json
+data/
+
+# ─── PCAP Files ─────────────────────────────────────────────────────────
+*.pcap
+*.pcapng
+
+# ─── Logs ──────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ─── OS ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.AppleDouble
+.LSOverride
+
+# ─── IDE ────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ─── Environment ─────────────────────────────────────────────────────────
+.env
+.env.local
+
