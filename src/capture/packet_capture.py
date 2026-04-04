@@ -8,8 +8,7 @@ import time
 import logging
 from typing import Optional
 
-from scapy.all import sniff, BPF filter
-from scapy.arch.common import BPF filter as BPF
+from scapy.all import sniff
 
 from src.capture.packet_parser import parse_packet, is_http_port
 from src.utils.config import (

@@ -6,9 +6,43 @@ import numpy as np
 from typing import Dict, List, Any
 
 # Thresholds
-COMMON_PORTS = {53, 80, 443, 22, 123, 137, 389, 88, 21, 465, 3268, 139, 445, 135, 8080, 8443}
 MIN_PAYLOAD_FOR_BURST = 10   # bytes — ignore tiny ACK packets
 BURST_IAT_THRESHOLD   = 0.1  # seconds — inter-arrival < this = burst
+
+
+def _detect_packet_direction(pkt: Dict) -> str:
+    """
+    Detect if a packet is forward (client→server) or backward (server→client).
+    Uses TCP flags heuristic:
+      - First SYN (no ACK) from flow initiator → forward
+      - SYN+ACK response → backward
+      - Established connection: use src_port pattern
+    Falls back to src_ip comparison.
+    """
+    tcp_flags = pkt.get("tcp_flags", {})
+
+    # SYN-only packet = flow initiator → forward
+    if tcp_flags.get("SYN") and not tcp_flags.get("ACK"):
+        return "fwd"
+    # SYN+ACK = response → backward
+    if tcp_flags.get("SYN") and tcp_flags.get("ACK"):
+        return "bwd"
+    # RST/FIN = end of flow, direction preserved
+    if tcp_flags.get("RST") or tcp_flags.get("FIN"):
+        return pkt.get("direction", "fwd")
+
+    # Fallback: known client ports (ephemeral range)
+    src_port = pkt.get("src_port", 0)
+    dst_port = pkt.get("dst_port", 0)
+    if src_port > 49152:
+        # Source is ephemeral (client) → forward
+        return "fwd"
+    elif dst_port > 49152:
+        # Destination is ephemeral → backward
+        return "bwd"
+
+    # Generic fallback
+    return "fwd"
 
 
 def extract_window_features(packets: List[Dict], src_ip: str, window_start: float) -> Dict[str, Any]:
@@ -28,6 +62,10 @@ def extract_window_features(packets: List[Dict], src_ip: str, window_start: floa
 
     # Sort by timestamp
     packets = sorted(packets, key=lambda p: p["timestamp"])
+
+    # Assign directions to each packet using heuristic
+    for pkt in packets:
+        pkt["direction"] = _detect_packet_direction(pkt)
 
     # Basic packet counts
     n_fwd = sum(1 for p in packets if p.get("direction", "fwd") == "fwd")
@@ -62,12 +100,12 @@ def extract_window_features(packets: List[Dict], src_ip: str, window_start: floa
     else:
         iats = np.array([0.0])
 
-    # Burst detection: inter-arrival < BURST_IAT_THRESHOLD
+    # Burst detection: inter-arrival < BURST_IAT_THRESHOLD (all packets)
     burst_mask = iats < BURST_IAT_THRESHOLD
     burst_count = int(burst_mask.sum())
     burst_ratio = burst_count / max(len(iats), 1)
 
-    # Only count bursts in forward direction (upload direction)
+    # Also count bursts in forward direction only (upload direction)
     if len(timestamps) > 1:
         fwd_iats = np.array([
             timestamps[i+1] - timestamps[i]
@@ -75,12 +113,30 @@ def extract_window_features(packets: List[Dict], src_ip: str, window_start: floa
             if packets[i].get("direction", "fwd") == "fwd"
         ])
         fwd_burst_count = int((fwd_iats < BURST_IAT_THRESHOLD).sum())
+        # For backward burst, use the smaller value (less relevant for exfil)
+        bwd_burst_count = burst_count - fwd_burst_count
+        bwd_burst_count = max(0, bwd_burst_count)
     else:
         fwd_burst_count = 0
+        bwd_burst_count = 0
 
-    # Unusual ports
-    unusual_port_count = sum(1 for p in dst_ports if int(p) not in COMMON_PORTS)
-    unusual_port_ratio = unusual_port_count / max(len(dst_ports), 1)
+    # Use forward burst count as the primary metric for exfil detection
+    # (exfil = uploading data = forward direction)
+    burst_count = fwd_burst_count
+    burst_ratio = burst_count / max(len(fwd_iats), 1)
+
+    # Unusual ports — flag ports that are suspicious for exfiltration.
+    # PCAP captured from victim/server side: dst_port = client ephemeral (high port)
+    # and src_port = server port. We check src_port for suspicious server ports.
+    # For legitimate HTTP traffic (PCAP from victim side):
+    #   - src_port should be in {80, 443, 8080, 8443, 53, ...}
+    #   - dst_port = client ephemeral = normal
+    # Suspicious = server port that is NOT a common service port
+    SERVER_PORTS = {80, 443, 8080, 8443, 53, 22, 21, 25, 110, 143, 993, 995, 587, 465}
+    src_ports = np.array([p.get("src_port", 0) for p in packets])
+    unusual_srv_count = sum(1 for p in src_ports
+                            if int(p) > 0 and int(p) not in SERVER_PORTS)
+    unusual_port_ratio = unusual_srv_count / max(len(src_ports), 1)
 
     # Request rate
     requests_per_second = len(packets) / max(duration, 0.001)

@@ -126,15 +126,30 @@ Metrics: AUC-ROC, F1-Score, FPR, Precision, Recall, Detection Time, Throughput.
 
 ---
 
-## Dataset
+## Tải Data & Models
 
-| Source | Location | Mô tả |
-|---|---|---|
-| CICIDS2017 (ML-CVE) | `data/raw/CICIDS2017_ML-CVE/` | 8 CSV files, đã trích xuất features bằng CICFlowMeter. **Dùng để huấn luyện.** |
-| CICIDS2017 (Original) | `data/raw/CICIDS2017_TrafficLabelling_Original/` | Bản gốc — tham khảo |
-| Friday-WorkingHours.pcap | `data/raw/` | Raw packet capture |
+> ⚠️ File data và trained models **quá lớn** cho GitHub (~900MB).
+> Download từ **Google Drive**: `[Link Google Drive]`
 
-**Source:** https://www.unb.ca/cic/datasets/index.html
+Sau khi tải, giải nén vào thư mục gốc:
+
+```
+Exfiltration/
+├── data/
+│   ├── raw/CICIDS2017_ML-CVE/*.csv     ← 8 file CSV
+│   └── processed/
+│       ├── train.csv, test.csv, val.csv
+│       ├── *.npy
+│       └── evaluation_results.json
+└── models/
+    ├── scaler.pkl
+    ├── isolation_forest.pkl
+    ├── oneclass_svm.pkl
+    ├── bilstm_model.h5
+    └── cnn1d_model.h5
+```
+
+Hoặc tự download CICIDS2017 từ: https://www.unb.ca/cic/datasets/ids-2017.html
 
 ---
 

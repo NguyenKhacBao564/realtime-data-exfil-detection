@@ -140,11 +140,13 @@ class AlertLogger:
         print(msg)
 
     def log_info(self, features: Dict[str, Any], burst_score: float):
-        """Log a normal traffic info line."""
+        """Log a normal traffic window — silent (no per-window output to avoid console spam)."""
         self.total_checked += 1
-        msg = format_info(features, burst_score, color=self.console_color)
-        self.logger.info(f"{features.get('src_ip')} req={features.get('request_count')} score={burst_score:.3f}")
-        print(msg)
+        # Only log to file, skip console to avoid spam
+        self.logger.debug(
+            f"{features.get('src_ip')} req={features.get('request_count')} "
+            f"score={burst_score:.3f} bytes={features.get('total_bytes', 0):,}"
+        )
 
     def log_error(self, message: str):
         """Log an error."""

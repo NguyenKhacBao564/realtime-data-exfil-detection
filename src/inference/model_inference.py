@@ -7,6 +7,7 @@ import threading
 import time
 import logging
 import queue
+import numpy as np
 from typing import Optional, Dict, Any
 
 from src.inference.model_loader import ModelLoader
@@ -98,7 +99,7 @@ class InferenceThread(threading.Thread):
                     f"alerts={self.stats['alerts_triggered']}")
 
     def _load_model(self):
-        """Load scaler and model at startup."""
+        """Load scaler and model at startup. Gracefully handles all errors."""
         import joblib
         import numpy as np
         from pathlib import Path
@@ -106,8 +107,12 @@ class InferenceThread(threading.Thread):
         # Load scaler
         scaler_path = Path(self.scaler_path or str(MODEL_DIR / "scaler.pkl"))
         if scaler_path.exists():
-            self.scaler = joblib.load(scaler_path)
-            logger.info(f"[INFERENCE] Scaler loaded: {scaler_path.name}")
+            try:
+                self.scaler = joblib.load(scaler_path)
+                logger.info(f"[INFERENCE] Scaler loaded: {scaler_path.name}")
+            except Exception as e:
+                logger.warning(f"[INFERENCE] Scaler load failed: {e} — proceeding without scaler")
+                self.scaler = None
         else:
             logger.warning(f"[INFERENCE] Scaler not found: {scaler_path}")
             self.scaler = None
@@ -115,56 +120,52 @@ class InferenceThread(threading.Thread):
         # Load model
         model_path = Path(self.model_path or str(MODEL_DIR / "isolation_forest.pkl"))
         if model_path.exists():
-            self.model_loader.load(model_path)
-            logger.info(f"[INFERENCE] Model loaded: {model_path.name}")
+            try:
+                self.model_loader.load(model_path)
+                logger.info(f"[INFERENCE] Model loaded: {model_path.name}")
+            except Exception as e:
+                # Keras 3.x custom objects issue — try with compile=False
+                logger.warning(f"[INFERENCE] Model load failed: {e}")
+                try:
+                    from tensorflow import keras
+                    self.model_loader.model = keras.models.load_model(
+                        model_path, compile=False
+                    )
+                    self.model_loader.model_type = "keras"
+                    logger.info(f"[INFERENCE] Model loaded (compile=False): {model_path.name}")
+                except Exception as e2:
+                    logger.warning(f"[INFERENCE] Keras load also failed: {e2} — using burst_score only")
+                    self.model_loader.model = None
         else:
             logger.warning(f"[INFERENCE] Model not found: {model_path} — using burst_score only")
             self.model_loader.model = None
 
         # Warm up with dummy prediction
         if self.model_loader.model is not None:
-            import numpy as np
             try:
-                dummy = np.random.randn(1, self.scaler.n_features_in_ if self.scaler else 20)
+                n_feats = self.scaler.n_features_in_ if self.scaler else 20
+                dummy = np.random.randn(1, n_feats).astype(np.float32)
                 _ = self.model_loader.predict(dummy)
                 logger.info("[INFERENCE] Model warmup OK")
             except Exception as e:
-                logger.warning(f"[INFERENCE] Model warmup failed: {e}")
+                logger.warning(f"[INFERENCE] Model warmup failed: {e} — disabling model")
+                self.model_loader.model = None
 
     def _process_window(self, features: Dict[str, Any]):
         """Process a single window — predict and log."""
-        import numpy as np
-
         self.stats["windows_processed"] += 1
 
         # 1. Compute burst_exfil_score
         score = burst_exfil_score(features)
         severity = get_severity(score)
 
-        # 2. Model prediction (if model is loaded)
+        # 2. Model prediction — SKIP due to feature mismatch.
+        # Pipeline window features (from raw packets) ≠ CICFlowMeter features (67 features, per-flow).
+        # Real-time detection relies on burst_exfil_score + burst_exfil.py instead.
         model_score = None
         prediction = None
 
-        if self.model_loader.model is not None and self.scaler is not None:
-            try:
-                # Build feature vector from dict
-                feature_vector = self._build_feature_vector(features)
-                if feature_vector is not None:
-                    X = self.scaler.transform([feature_vector])
-                    model_score = float(self.model_loader.predict(X)[0])
-                    model_name = type(self.model_loader.model).__name__
-
-                    # For sklearn: score > 0 = more normal, score < 0 = anomaly
-                    # For keras: probability of exfil
-                    if "sklearn" in str(type(self.model_loader.model)):
-                        # IsolationForest/OCSVM: score is anomaly score (lower = more anomalous)
-                        # We use the raw score
-                        pass
-
-            except Exception as e:
-                logger.warning(f"[INFERENCE] Model prediction failed: {e}")
-
-        # 3. Determine if alert should fire
+        # 3. Determine if alert should fire (burst_exfil_score only)
         alert_fired = score > self.burst_threshold
 
         if alert_fired:

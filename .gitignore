@@ -10,25 +10,22 @@ env/
 dist/
 build/
 
-ARCHITECTURE.md 
-CLAUDE.md
-PROGRESS.md
-topic.md
 # ─── Jupyter ────────────────────────────────────────────────────────────
 .ipynb_checkpoints/
 *.ipynb_checkpoints
 
-# ─── Trained Models & Scalers ───────────────────────────────────────────
-models/*.pkl
-models/*.h5
-models/*.keras
-
-# ─── Processed Data ─────────────────────────────────────────────────────
-data/processed/*.csv
-data/processed/*.json
+# ─── Data & Models (too large — share via Google Drive) ───────────────
+# Instructions:
+#   1. Download CICIDS2017 from https://www.unb.ca/cic/datasets/ids-2017.html
+#   2. Extract data/raw/CICIDS2017_ML-CVE/*.csv
+#   3. Extract data/raw/Friday-WorkingHours.pcap (optional, for pipeline testing)
+#   4. Put trained models (*.pkl, *.h5) into models/
+#   5. Put processed data (*.csv, *.npy, *.json) into data/processed/
+#   → Or download all from: [Google Drive link here]
 data/
+models/
 
-# ─── PCAP Files ─────────────────────────────────────────────────────────
+# ─── PCAP Files (always too large) ──────────────────────────────────────
 *.pcap
 *.pcapng
 
@@ -42,13 +39,15 @@ Thumbs.db
 .AppleDouble
 .LSOverride
 
-# ─── IDE ────────────────────────────────────────────────────────────────
+# ─── IDE ───────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# ─── Environment ─────────────────────────────────────────────────────────
+# ─── Environment ──────────────────────────────────────────────────────
 .env
 .env.local
 
+# ─── Bonus capture (large, one-off) ────────────────────────────────────
+docs/bonus_capture/

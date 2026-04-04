@@ -80,10 +80,10 @@ COLS_TO_DROP = [
 # =============================================================================
 # PIPELINE CONFIG
 # =============================================================================
-WINDOW_SIZE          = 60       # seconds — aggregation window
+WINDOW_SIZE            = 60       # seconds — aggregation window
 MIN_PACKETS_PER_WINDOW = 3      # skip IPs with fewer packets
-PACKET_QUEUE_SIZE    = 10000    # max packets in queue
-FEATURE_QUEUE_SIZE   = 1000     # max windows in queue
+PACKET_QUEUE_SIZE      = 50000   # max packets in queue
+FEATURE_QUEUE_SIZE     = 10000   # max windows in queue
 
 # =============================================================================
 # CAPTURE CONFIG
@@ -98,6 +98,7 @@ COMMON_PORTS    = [53, 80, 443, 22, 123, 137, 389, 88, 21, 465, 3268, 139, 445, 
 # =============================================================================
 DEFAULT_MODEL   = "isolation_forest"  # switchable: isolation_forest, oneclass_svm, bilstm, cnn1d
 BURST_EXFIL_THRESHOLD = 0.7  # alert if score > 0.7
+SCALER_PATH = MODEL_DIR / "scaler.pkl"
 
 # =============================================================================
 # LOGGING CONFIG
