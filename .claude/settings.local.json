@@ -20,7 +20,22 @@
       "Bash(/opt/miniconda3/envs/exfil/bin/python -c \"import scapy, pandas, sklearn, tensorflow, numpy; print\\('✅ All packages verified OK'\\)\")",
       "Bash(git init:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(conda info:*)",
+      "Bash(source ~/.zshrc)",
+      "Bash(export PATH=\"/opt/miniconda3/bin:$PATH\")",
+      "Bash(source /opt/miniconda3/etc/profile.d/conda.sh)",
+      "Bash(conda activate:*)",
+      "Bash(python3 -c \":*)",
+      "Bash(python3:*)",
+      "Bash(PYTHONPATH=\"$PWD:$PYTHONPATH\" python src/train/preprocess.py)",
+      "Bash(PYTHONPATH=\"$PWD:$PYTHONPATH\" python -c \":*)",
+      "Bash(python -c \"from imblearn.over_sampling import SMOTE; print\\(''SMOTE available''\\)\")",
+      "Bash(pip install:*)",
+      "Bash(python -c \"from imblearn.over_sampling import SMOTE; print\\(''SMOTE OK''\\)\")",
+      "Bash(PYTHONPATH=\"$PWD:$PYTHONPATH\" python src/train/train_fast.py)",
+      "Bash(PYTHONPATH=\"$PWD:$PYTHONPATH\" python src/train/evaluate.py)",
+      "Bash(python -c \":*)"
     ]
   }
 }
