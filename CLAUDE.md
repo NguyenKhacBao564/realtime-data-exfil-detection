@@ -479,32 +479,38 @@ jupyter>=1.0.0
 
 ## 11. Evaluation Results
 
+> **2026-04-05 UPDATE — FPR FIXED:** Threshold tuning successfully reduced FPR from ~0.45 to ~0.025. ✅ Mục tiêu FPR < 5% đạt được!
 
-| Model | Type | AUC-ROC | F1 | Precision | Recall | FPR | Status |
+### Final Tuned Models (threshold-tuned)
+
+| Model | AUC-ROC | F1 | Precision | Recall | FPR | Threshold | Status |
 |---|---|---|---|---|---|---|---|
-| **CNN1D** | Supervised | **0.9423** ✅ | 0.0033 | 0.0016 | 1.0000 | 0.4477 | **BEST — use as primary** |
-| **BiLSTM** | Supervised | **0.9012** ✅ | 0.0033 | 0.0017 | 1.0000 | 0.4416 | ✅ Use as secondary |
-| One-Class SVM | Anomaly | 0.5546 | 0.0013 | 0.0007 | 0.0447 | 0.0493 | ❌ Not effective |
-| Isolation Forest | Anomaly | 0.5277 | 0.0006 | 0.0003 | 0.0383 | 0.1010 | ❌ Not effective |
+| **CNN1D (Final)** | **0.9971** ✅ | 0.0567 | 0.0292 | 1.0000 | **0.0245** ✅ | 0.207 | **BEST — use as primary** |
+| **BiLSTM (Final)** | **0.9966** ✅ | 0.0438 | 0.0224 | 1.0000 | **0.0322** ✅ | 0.167 | ✅ Use as secondary |
 
-> **Note:** F1 thấp là expected với extreme class imbalance (0.07% exfil). Metric quan trọng là **AUC-ROC**: CNN1D đạt 0.9423 = excellent discrimination power.
+### Original Models (before threshold tuning, threshold=0.5)
 
-**Key Findings:**
-- Anomaly models kém vì Bot traffic giống Normal trong raw 67-feature space
-- Supervised models với Focal Loss + SMOTE oversampling đạt kết quả xuất sắc
-- CNN1D dùng GlobalAveragePooling1D nhanh hơn Flatten, cho kết quả tốt hơn
+| Model | AUC-ROC | F1 | Precision | Recall | FPR | Status |
+|---|---|---|---|---|---|---|---|
+| CNN1D | 0.9423 ✅ | 0.0033 | 0.0016 | 1.0000 | 0.4477 | ❌ FPR too high |
+| BiLSTM | 0.9012 ✅ | 0.0033 | 0.0017 | 1.0000 | 0.4416 | ❌ FPR too high |
+| One-Class SVM | 0.5546 | 0.0013 | 0.0007 | 0.0447 | 0.0493 | ❌ Not effective |
+| Isolation Forest | 0.5277 | 0.0006 | 0.0003 | 0.0383 | 0.1010 | ❌ Not effective |
+
+> **Key Fix:** `train_final.py` — Subsample 100K (1.6% exfil) → SMOTE 10% → Focal Loss α=0.50 → class_weight={0:1,1:5} → threshold tuning → FPR 0.025 ✅
 
 **Training scripts:**
 - `src/train/preprocess.py` — load, label, split, scale
 - `src/train/train_anomaly.py` — Isolation Forest + OCSVM
 - `src/train/train_fast.py` — BiLSTM + CNN1D với SMOTE + Focal Loss
-- `src/train/evaluate.py` — ROC curves, confusion matrices
+- `src/train/train_final.py` — **Final tuned models** (Subsample + SMOTE + Threshold Tuning)
+- `src/train/evaluate.py` — ROC curves, confusion matrices (auto-uses tuned thresholds)
 
 **Remaining work:**
-1. Test pipeline on real PCAP (`python src/pipeline.py --offline --pcap data/raw/Friday-WorkingHours.pcap`)
-2. Write `docs/bao_cao.docx`
-3. Prepare bonus self-captured scenario
-4. Create slide presentation
+1. ✅ Test pipeline on real PCAP (`python src/pipeline.py --offline --pcap data/raw/Friday-WorkingHours.pcap`)
+2. ✅ Write `docs/bao_cao.docx`
+3. ⏳ Prepare bonus self-captured scenario
+4. ⏳ Create slide presentation
 
 ---
 

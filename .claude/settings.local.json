@@ -35,7 +35,17 @@
       "Bash(python -c \"from imblearn.over_sampling import SMOTE; print\\(''SMOTE OK''\\)\")",
       "Bash(PYTHONPATH=\"$PWD:$PYTHONPATH\" python src/train/train_fast.py)",
       "Bash(PYTHONPATH=\"$PWD:$PYTHONPATH\" python src/train/evaluate.py)",
-      "Bash(python -c \":*)"
+      "Bash(python -c \":*)",
+      "Bash(ls /Users/nguyen_bao/Documents/AI_Project/Exfiltration/data/raw/*.pcap)",
+      "Bash(python:*)",
+      "Bash(conda env:*)",
+      "Read(//Users/nguyen_bao/miniconda3/**)",
+      "Skill(update-config)",
+      "Bash(docker --version)",
+      "Bash(sw_vers)",
+      "Read(//etc/**)",
+      "Bash(docker info:*)",
+      "Bash(docker network:*)"
     ]
   }
 }

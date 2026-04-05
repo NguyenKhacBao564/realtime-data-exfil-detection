@@ -70,9 +70,14 @@ def load_anomaly_model(name: str):
 
 
 def load_dl_model(name: str):
-    """Load a Keras model."""
+    """Load a Keras model. Prefers _final (tuned threshold) models."""
     if not HAS_KERAS:
         return None
+    # Prefer final (tuned) model if it exists
+    final_path = MODEL_DIR / f"{name.lower()}_final.h5"
+    if final_path.exists():
+        return keras.models.load_model(str(final_path), compile=False)
+    # Fall back to original model
     path = MODEL_DIR / f"{name.lower()}_model.h5"
     if not path.exists():
         return None
@@ -106,6 +111,8 @@ def evaluate_supervised(model, X_test, y_test, name: str):
     """
     Evaluate a supervised model.
     X_test is (N, 1, n_features) for Keras.
+    Uses tuned thresholds from final_results.json when available,
+    otherwise falls back to 0.5.
     """
     if len(X_test.shape) == 3:
         # Keras expects (N, 1, n_features)
@@ -113,9 +120,30 @@ def evaluate_supervised(model, X_test, y_test, name: str):
     else:
         probs = model.predict(X_test, verbose=0).ravel()
 
-    preds = (probs >= 0.5).astype(int)
+    # Try to load tuned threshold
+    threshold = 0.5
+    tuned_threshold_path = PROCESSED_DIR / "final_results.json"
+    if tuned_threshold_path.exists():
+        try:
+            with open(tuned_threshold_path) as f:
+                fr = json.load(f)
+            # Match model name to result key
+            key = name  # e.g. "CNN1D"
+            if key in fr and "optimal_threshold" in fr[key]:
+                threshold = fr[key]["optimal_threshold"]
+                logger.info(f"  Using tuned threshold {threshold:.4f} for {name}")
+        except Exception:
+            pass
 
-    results = {"name": name, "type": "supervised", "scores": probs, "preds": preds}
+    preds = (probs >= threshold).astype(int)
+
+    results = {
+        "name": name,
+        "type": "supervised",
+        "scores": probs,
+        "preds": preds,
+        "threshold_used": threshold,
+    }
     results["auc"] = roc_auc_score(y_test, probs) if len(np.unique(y_test)) > 1 else 0.5
     results["f1"] = f1_score(y_test, preds, zero_division=0)
     results["precision"] = precision_score(y_test, preds, zero_division=0)
@@ -292,9 +320,13 @@ def run_evaluation():
         models["Isolation Forest"] = ("anomaly", "isolation_forest.pkl")
     if (MODEL_DIR / "oneclass_svm.pkl").exists():
         models["One-Class SVM"] = ("anomaly", "oneclass_svm.pkl")
-    if HAS_KERAS and (MODEL_DIR / "bilstm_model.h5").exists():
+    if HAS_KERAS and (MODEL_DIR / "bilstm_final.h5").exists():
+        models["BiLSTM"] = ("supervised", "bilstm_final.h5")
+    elif HAS_KERAS and (MODEL_DIR / "bilstm_model.h5").exists():
         models["BiLSTM"] = ("supervised", "bilstm_model.h5")
-    if HAS_KERAS and (MODEL_DIR / "cnn1d_model.h5").exists():
+    if HAS_KERAS and (MODEL_DIR / "cnn1d_final.h5").exists():
+        models["CNN1D"] = ("supervised", "cnn1d_final.h5")
+    elif HAS_KERAS and (MODEL_DIR / "cnn1d_model.h5").exists():
         models["CNN1D"] = ("supervised", "cnn1d_model.h5")
 
     if not models:

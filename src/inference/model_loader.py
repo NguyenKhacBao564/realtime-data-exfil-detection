@@ -53,7 +53,7 @@ class ModelLoader:
         elif suffix == ".h5" or suffix == ".keras":
             if not HAS_KERAS:
                 raise ImportError("TensorFlow/Keras not installed. Cannot load .h5 model.")
-            self.model = keras.models.load_model(path)
+            self.model = keras.models.load_model(path, compile=False)
             self.model_type = "keras"
             logger.info(f"Loaded Keras model: {path.name}")
 
