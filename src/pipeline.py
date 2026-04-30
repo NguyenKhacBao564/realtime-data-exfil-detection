@@ -53,8 +53,11 @@ def run_pipeline(
     offline_mode: bool = True,
     pcap_file: str = None,
     capture_iface: str = None,
+    capture_host: str = None,
     model_path: str = None,
     scaler_path: str = None,
+    window_size: float = WINDOW_SIZE,
+    burst_threshold: float = None,
 ):
     """
     Run the full detection pipeline.
@@ -63,8 +66,11 @@ def run_pipeline(
         offline_mode: Use PCAP file (True) or live interface (False)
         pcap_file: Path to PCAP file (for offline mode)
         capture_iface: Network interface name (for live mode)
+        capture_host: Optional src/dst IP filter for focused demo capture
         model_path: Path to model file (.pkl or .h5)
         scaler_path: Path to scaler file (.pkl)
+        window_size: Aggregation window size in seconds
+        burst_threshold: Alert threshold for burst_exfil_score
     """
     import queue
 
@@ -75,8 +81,10 @@ def run_pipeline(
     logger.info(f"Mode: {'OFFLINE (PCAP)' if offline_mode else 'LIVE (interface)'}")
     logger.info(f"PCAP: {pcap_file}")
     logger.info(f"Interface: {capture_iface}")
+    logger.info(f"Capture host: {capture_host}")
     logger.info(f"Model: {model_path}")
-    logger.info(f"Window size: {WINDOW_SIZE}s")
+    logger.info(f"Window size: {window_size}s")
+    logger.info(f"Burst threshold: {burst_threshold if burst_threshold is not None else 'default'}")
 
     # Shared state
     packet_queue = queue.Queue(maxsize=PACKET_QUEUE_SIZE)
@@ -103,12 +111,14 @@ def run_pipeline(
         offline_mode=offline_mode,
         pcap_file=pcap_file,
         capture_iface=capture_iface,
+        capture_host=capture_host,
     )
 
     aggregator_thread = FeatureAggregatorThread(
         packet_queue=packet_queue,
         feature_queue=feature_queue,
         stop_event=stop_event,
+        window_size=window_size,
     )
 
     inference_thread = InferenceThread(
@@ -116,6 +126,7 @@ def run_pipeline(
         stop_event=stop_event,
         model_path=model_path,
         scaler_path=scaler_path,
+        burst_threshold=burst_threshold,
     )
 
     # Start all threads
@@ -136,11 +147,13 @@ def run_pipeline(
     logger.info("Pipeline running — press Ctrl+C to stop")
     try:
         while not stop_event.is_set():
-            # Check if capture thread has finished (for offline mode)
-            if offline_mode and not capture_thread.is_alive():
-                logger.info("Capture thread finished — waiting for processing to complete...")
-                # Give aggregator time to flush remaining windows
-                time.sleep(WINDOW_SIZE + 2)
+            if not capture_thread.is_alive():
+                if offline_mode:
+                    logger.info("Capture thread finished — waiting for processing to complete...")
+                    # Give aggregator time to flush remaining windows
+                    time.sleep(window_size + 2)
+                else:
+                    logger.error("Live capture thread stopped unexpectedly — stopping pipeline")
                 stop_event.set()
                 break
             time.sleep(1)
@@ -190,10 +203,16 @@ def main():
                       help="Path to PCAP file (offline mode)")
     parser.add_argument("--iface", type=str, default=None,
                       help="Network interface name (live mode)")
+    parser.add_argument("--capture-host", type=str, default=None,
+                      help="Only capture packets where src/dst IP matches this host")
     parser.add_argument("--model", type=str, default=None,
                       help="Path to model file (.pkl or .h5)")
     parser.add_argument("--scaler", type=str, default=None,
                       help="Path to scaler file (.pkl)")
+    parser.add_argument("--window-size", type=float, default=WINDOW_SIZE,
+                      help="Aggregation window size in seconds")
+    parser.add_argument("--burst-threshold", type=float, default=None,
+                      help="Alert threshold for burst_exfil_score")
     parser.add_argument("--debug", action="store_true",
                       help="Enable DEBUG logging")
 
@@ -203,8 +222,13 @@ def main():
     log_level = "DEBUG" if args.debug else "INFO"
     setup_logging(log_level)
 
-    # Determine mode
-    offline = args.offline or OFFLINE_MODE
+    # Determine mode. Explicit CLI flags must override config defaults.
+    if args.live:
+        offline = False
+    elif args.offline:
+        offline = True
+    else:
+        offline = OFFLINE_MODE
     pcap = args.pcap or str(PCAP_FILE)
     iface = args.iface or CAPTURE_IFACE
 
@@ -212,8 +236,11 @@ def main():
         offline_mode=offline,
         pcap_file=pcap,
         capture_iface=iface,
+        capture_host=args.capture_host,
         model_path=args.model,
         scaler_path=args.scaler,
+        window_size=args.window_size,
+        burst_threshold=args.burst_threshold,
     )
 
 

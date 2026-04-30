@@ -13,6 +13,7 @@ from typing import Optional, Dict, Any
 from src.inference.model_loader import ModelLoader
 from src.inference.alert_logger import AlertLogger
 from src.features.burst_exfil import burst_exfil_score, get_severity
+from src.features.runtime_features import build_runtime_feature_vector
 from src.utils.config import MODEL_DIR, BURST_EXFIL_THRESHOLD, SCALER_PATH
 from src.utils.helpers import get_logger
 
@@ -50,10 +51,11 @@ class InferenceThread(threading.Thread):
         self.stop_event = stop_event
         self.model_path = model_path
         self.scaler_path = scaler_path
-        self.burst_threshold = burst_threshold
+        self.burst_threshold = BURST_EXFIL_THRESHOLD if burst_threshold is None else burst_threshold
 
         self.model_loader = ModelLoader()
         self.alert_logger = AlertLogger(console_color=True)
+        self._model_skip_logged = False
 
         self.stats = {
             "windows_processed": 0,
@@ -118,7 +120,13 @@ class InferenceThread(threading.Thread):
             self.scaler = None
 
         # Load model
-        model_path = Path(self.model_path or str(MODEL_DIR / "isolation_forest.pkl"))
+        default_runtime_model = MODEL_DIR / "runtime_window_rf.pkl"
+        if self.model_path:
+            model_path = Path(self.model_path)
+        elif default_runtime_model.exists():
+            model_path = default_runtime_model
+        else:
+            model_path = MODEL_DIR / "isolation_forest.pkl"
         if model_path.exists():
             try:
                 self.model_loader.load(model_path)
@@ -143,7 +151,10 @@ class InferenceThread(threading.Thread):
         # Warm up with dummy prediction
         if self.model_loader.model is not None:
             try:
-                n_feats = self.scaler.n_features_in_ if self.scaler else 20
+                if self.model_loader.model_type == "runtime_window":
+                    n_feats = len(self.model_loader.model.get("feature_names", [])) or 17
+                else:
+                    n_feats = self.scaler.n_features_in_ if self.scaler else 20
                 dummy = np.random.randn(1, n_feats).astype(np.float32)
                 _ = self.model_loader.predict(dummy)
                 logger.info("[INFERENCE] Model warmup OK")
@@ -159,14 +170,15 @@ class InferenceThread(threading.Thread):
         score = burst_exfil_score(features)
         severity = get_severity(score)
 
-        # 2. Model prediction — SKIP due to feature mismatch.
-        # Pipeline window features (from raw packets) ≠ CICFlowMeter features (67 features, per-flow).
-        # Real-time detection relies on burst_exfil_score + burst_exfil.py instead.
-        model_score = None
-        prediction = None
+        # 2. Runtime model prediction when the loaded model is compatible with
+        # live packet-window features. CICFlowMeter-trained DL models are still
+        # skipped because their 67-feature input space does not match.
+        model_score, prediction = self._predict_runtime_window(features)
 
-        # 3. Determine if alert should fire (burst_exfil_score only)
-        alert_fired = score > self.burst_threshold
+        # 3. Determine if alert should fire
+        alert_fired = score > self.burst_threshold or prediction == 1
+        if prediction == 1 and score < 0.70:
+            severity = "MEDIUM"
 
         if alert_fired:
             self.stats["alerts_triggered"] += 1
@@ -179,6 +191,48 @@ class InferenceThread(threading.Thread):
             )
         else:
             self.alert_logger.log_info(features=features, burst_score=score)
+
+    def _predict_runtime_window(self, features: Dict[str, Any]):
+        """Predict on live window features when the loaded model is compatible."""
+        if self.model_loader.model is None:
+            return None, None
+
+        vec = build_runtime_feature_vector(features).reshape(1, -1)
+        model_type = self.model_loader.model_type
+
+        if model_type == "runtime_window":
+            expected = self.model_loader.model.get("feature_names", [])
+            if expected and len(expected) != vec.shape[1]:
+                logger.warning(
+                    "[INFERENCE] Runtime model feature mismatch: "
+                    f"expected={len(expected)} got={vec.shape[1]} — using burst_score only"
+                )
+                return None, None
+            model_score = float(self.model_loader.predict(vec)[0])
+            threshold = float(self.model_loader.model.get("threshold", 0.5))
+            return model_score, int(model_score >= threshold)
+
+        # Best-effort support for sklearn models trained on the same runtime
+        # vector. Skip CICFlowMeter models cleanly instead of crashing.
+        estimator = self.model_loader.model
+        expected = getattr(estimator, "n_features_in_", None)
+        if expected != vec.shape[1]:
+            if not self._model_skip_logged:
+                logger.warning(
+                    "[INFERENCE] Loaded model is not compatible with live window features "
+                    f"(expected={expected}, got={vec.shape[1]}) — using burst_score only"
+                )
+                self._model_skip_logged = True
+            return None, None
+
+        try:
+            raw_score = float(self.model_loader.predict(vec)[0])
+            if 0.0 <= raw_score <= 1.0:
+                return raw_score, int(raw_score >= 0.5)
+            return raw_score, int(raw_score < 0.0)
+        except Exception as e:
+            logger.warning(f"[INFERENCE] Runtime prediction failed: {e} — using burst_score only")
+            return None, None
 
     def _build_feature_vector(self, features: Dict[str, Any]) -> Optional[np.ndarray]:
         """

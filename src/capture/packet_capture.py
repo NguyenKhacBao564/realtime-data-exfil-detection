@@ -54,6 +54,7 @@ class PacketCaptureThread(threading.Thread):
         packet_queue,
         stop_event: threading.Event,
         capture_iface: Optional[str] = None,
+        capture_host: Optional[str] = None,
         offline_mode: bool = True,
         pcap_file: Optional[str] = None,
         http_only: bool = True,
@@ -62,6 +63,7 @@ class PacketCaptureThread(threading.Thread):
         self.packet_queue = packet_queue
         self.stop_event = stop_event
         self.capture_iface = capture_iface or CAPTURE_IFACE
+        self.capture_host = capture_host
         self.offline_mode = offline_mode
         self.pcap_file = str(pcap_file or PCAP_FILE)
         self.http_only = http_only
@@ -85,6 +87,8 @@ class PacketCaptureThread(threading.Thread):
             logger.info(f"[CAPTURE] PCAP file: {self.pcap_file}")
         else:
             logger.info(f"[CAPTURE] Interface: {self.capture_iface}")
+        if self.capture_host:
+            logger.info(f"[CAPTURE] Capture host filter: {self.capture_host}")
 
         self.stats["start_time"] = time.time()
 
@@ -109,10 +113,7 @@ class PacketCaptureThread(threading.Thread):
             logger.error(f"[CAPTURE] PCAP file not found: {self.pcap_file}")
             return
 
-        # Build BPF filter for HTTP ports
-        port_filter = " or ".join(f"port {p}" for p in HTTP_PORTS)
-        bpf_filter = f"tcp ({port_filter})"
-
+        bpf_filter = self._build_bpf_filter()
         logger.info(f"[CAPTURE] BPF filter: {bpf_filter}")
 
         def _callback(pkt):
@@ -133,6 +134,9 @@ class PacketCaptureThread(threading.Thread):
                 if pkt_dict["dst_port"] not in HTTP_PORTS and pkt_dict["src_port"] not in HTTP_PORTS:
                     self.stats["packets_skipped"] += 1
                     return
+            if not self._matches_capture_host(pkt_dict):
+                self.stats["packets_skipped"] += 1
+                return
 
             # Push to queue (non-blocking)
             try:
@@ -153,8 +157,8 @@ class PacketCaptureThread(threading.Thread):
 
     def _run_live(self):
         """Sniff from live network interface."""
-        port_filter = " or ".join(f"port {p}" for p in HTTP_PORTS)
-        bpf_filter = f"tcp ({port_filter})"
+        bpf_filter = self._build_bpf_filter()
+        logger.info(f"[CAPTURE] BPF filter: {bpf_filter}")
 
         def _callback(pkt):
             if self.stop_event.is_set():
@@ -166,6 +170,9 @@ class PacketCaptureThread(threading.Thread):
             if pkt_dict is None:
                 self.stats["parse_errors"] += 1
                 return
+            if not self._matches_capture_host(pkt_dict):
+                self.stats["packets_skipped"] += 1
+                return
 
             try:
                 self.packet_queue.put_nowait(pkt_dict)
@@ -175,13 +182,33 @@ class PacketCaptureThread(threading.Thread):
                 if self.stats["packets_skipped"] % 1000 == 0:
                     logger.warning(f"[CAPTURE] Queue full — skipped {self.stats['packets_skipped']} packets")
 
-        sniff(
-            iface=self.capture_iface,
-            prn=_callback,
-            filter=bpf_filter,
-            store=False,
-            verbose=0,
-            stop_filter=lambda _: self.stop_event.is_set(),
+        # Use short sniff timeouts so Ctrl+C can stop the live pipeline even
+        # when no matching packets are arriving.
+        while not self.stop_event.is_set():
+            sniff(
+                iface=self.capture_iface,
+                prn=_callback,
+                filter=bpf_filter,
+                store=False,
+                timeout=1,
+                stop_filter=lambda _: self.stop_event.is_set(),
+            )
+
+    def _build_bpf_filter(self) -> str:
+        """Build BPF filter for HTTP traffic and optional host scoping."""
+        port_filter = " or ".join(f"port {p}" for p in HTTP_PORTS)
+        bpf_filter = f"tcp and ({port_filter})"
+        if self.capture_host:
+            bpf_filter = f"{bpf_filter} and host {self.capture_host}"
+        return bpf_filter
+
+    def _matches_capture_host(self, pkt_dict: dict) -> bool:
+        """Apply host filter in Python for offline mode and as a safety net."""
+        if not self.capture_host:
+            return True
+        return (
+            pkt_dict.get("src_ip") == self.capture_host
+            or pkt_dict.get("dst_ip") == self.capture_host
         )
 
     def get_stats(self) -> dict:

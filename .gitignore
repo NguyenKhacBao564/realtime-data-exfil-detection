@@ -51,3 +51,13 @@ Thumbs.db
 
 # ─── Bonus capture (large, one-off) ────────────────────────────────────
 docs/bonus_capture/
+
+AGENTS.md
+PlanForDemo.md
+CLAUDE.md
+demo.md
+PROGRESS.md
+exfil_detection*.log
+data/
+models/
+demo/uploads/

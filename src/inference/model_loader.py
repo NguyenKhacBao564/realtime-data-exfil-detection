@@ -47,8 +47,16 @@ class ModelLoader:
 
         if suffix == ".pkl":
             self.model = joblib.load(path)
-            self.model_type = "sklearn"
-            logger.info(f"Loaded sklearn model: {path.name} ({type(self.model).__name__})")
+            if isinstance(self.model, dict) and self.model.get("model_type") == "runtime_window_rf":
+                self.model_type = "runtime_window"
+                estimator = self.model.get("model")
+                logger.info(
+                    f"Loaded runtime window model: {path.name} "
+                    f"({type(estimator).__name__})"
+                )
+            else:
+                self.model_type = "sklearn"
+                logger.info(f"Loaded sklearn model: {path.name} ({type(self.model).__name__})")
 
         elif suffix == ".h5" or suffix == ".keras":
             if not HAS_KERAS:
@@ -86,10 +94,22 @@ class ModelLoader:
                 # decision_function: higher = more normal
                 # Convert to binary: score > threshold → normal(0), else anomaly(1)
                 return scores
+            elif hasattr(self.model, "predict_proba"):
+                probs = self.model.predict_proba(X)
+                return probs[:, 1] if probs.ndim == 2 and probs.shape[1] > 1 else probs.flatten()
             elif hasattr(self.model, "predict"):
                 return self.model.predict(X)
             else:
                 raise AttributeError(f"Sklearn model has no predict/decision_function")
+
+        elif self.model_type == "runtime_window":
+            estimator = self.model.get("model")
+            if estimator is None:
+                raise RuntimeError("Runtime window model artifact has no estimator")
+            if hasattr(estimator, "predict_proba"):
+                probs = estimator.predict_proba(X)
+                return probs[:, 1] if probs.ndim == 2 and probs.shape[1] > 1 else probs.flatten()
+            return estimator.predict(X)
 
         elif self.model_type == "keras":
             preds = self.model.predict(X, verbose=0)
@@ -104,7 +124,11 @@ class ModelLoader:
         For sklearn anomaly models: uses decision_function with auto-threshold.
         For keras: uses probability with given threshold.
         """
-        if self.model_type == "sklearn":
+        if self.model_type == "runtime_window":
+            threshold = float(self.model.get("threshold", threshold))
+            probs = self.predict(X)
+            return (probs >= threshold).astype(int)
+        elif self.model_type == "sklearn":
             scores = self.predict(X)
             # Auto-threshold: median of scores
             threshold = np.median(scores)
@@ -119,6 +143,8 @@ class ModelLoader:
             return "No model loaded"
         if self.model_type == "keras":
             return f"Keras model: {self.model_path.name}"
+        if self.model_type == "runtime_window":
+            return f"Runtime window model: {self.model_path.name}"
         else:
             return f"Sklearn model: {type(self.model).__name__}"
 
