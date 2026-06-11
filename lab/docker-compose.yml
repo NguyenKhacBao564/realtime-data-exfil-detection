@@ -19,20 +19,11 @@ services:
       - "8000:8000"
     volumes:
       - ./server/receiver.py:/receiver.py:ro
-    command: >
-      python3 -c "
-        import logging, sys
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s [%(levelname)s] %(message)s',
-            stream=sys.stdout
-        );
-        exec(open('/receiver.py').read())
-      "
+    command: ["python3", "/receiver.py", "--port", "8000", "--bind", "0.0.0.0"]
     networks:
       exfil-lab:
     healthcheck:
-      test: python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/browse', timeout=3)"
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/browse', timeout=3)\""]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -41,7 +32,9 @@ services:
   # victim-client — generates synthetic HTTP traffic
   # --------------------------------------------------------------------------
   victim-client:
-    image: python:3.11-slim
+    build:
+      context: ..
+      dockerfile: lab/victim/Dockerfile
     container_name: victim-client
     hostname: victim-client
     volumes:
