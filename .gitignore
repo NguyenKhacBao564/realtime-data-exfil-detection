@@ -50,6 +50,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# ─── Claude Code local settings ────────────────────────────────────────
+.claude/
+
 # ─── Environment ──────────────────────────────────────────────────────
 .env
 .env.local
