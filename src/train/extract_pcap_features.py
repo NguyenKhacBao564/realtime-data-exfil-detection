@@ -211,7 +211,6 @@ def extract_flow_features(flow_key, pkt_list, label=0, scenario=""):
         'Bwd Packets/s': n_bwd / (duration / 1_000_000),
 
         # === Packet length global ===
-        all_lens = fwd_lens + bwd_lens
         'Min Packet Length': min(all_lens) if all_lens else 0,
         'Max Packet Length': max(all_lens) if all_lens else 0,
         'Packet Length Mean': np.mean(all_lens) if all_lens else 0,

@@ -58,6 +58,9 @@ def run_pipeline(
     scaler_path: str = None,
     window_size: float = WINDOW_SIZE,
     burst_threshold: float = None,
+    enable_online_monitor: bool = False,
+    online_threshold: float = 0.5,
+    online_warmup_windows: int = 10,
 ):
     """
     Run the full detection pipeline.
@@ -85,6 +88,7 @@ def run_pipeline(
     logger.info(f"Model: {model_path}")
     logger.info(f"Window size: {window_size}s")
     logger.info(f"Burst threshold: {burst_threshold if burst_threshold is not None else 'default'}")
+    logger.info(f"Online monitor: enabled={enable_online_monitor} threshold={online_threshold} warmup={online_warmup_windows}")
 
     # Shared state
     packet_queue = queue.Queue(maxsize=PACKET_QUEUE_SIZE)
@@ -127,6 +131,9 @@ def run_pipeline(
         model_path=model_path,
         scaler_path=scaler_path,
         burst_threshold=burst_threshold,
+        enable_online_monitor=enable_online_monitor,
+        online_threshold=online_threshold,
+        online_warmup_windows=online_warmup_windows,
     )
 
     # Start all threads
@@ -183,7 +190,11 @@ def run_pipeline(
 
     inf_stats = inference_thread.get_stats()
     print(f"[INFERENCE]  processed={inf_stats['windows_processed']:,}  "
-          f"alerts={inf_stats['alerts_triggered']:,}")
+          f"alerts={inf_stats['alerts_triggered']:,}  "
+          f"online_anomalies={inf_stats.get('online_anomalies', 0):,}")
+    if inf_stats.get("online_baselines_active"):
+        print(f"[ONLINE]     baselines={inf_stats['online_baselines_active']:,}  "
+              f"windows_processed={inf_stats.get('online_monitor_stats', {}).get('windows_processed', 0):,}")
     print(inf_stats.get("alert_summary", ""))
 
     logger.info("Pipeline stopped gracefully.")
@@ -191,7 +202,8 @@ def run_pipeline(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="HTTP Exfiltration Detection Pipeline",
+        description="HTTP Exfiltration Detection Pipeline "
+                     "(offline-trained models + burst rules + online adaptive monitor)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     mode = parser.add_mutually_exclusive_group()
@@ -213,6 +225,12 @@ def main():
                       help="Aggregation window size in seconds")
     parser.add_argument("--burst-threshold", type=float, default=None,
                       help="Alert threshold for burst_exfil_score")
+    parser.add_argument("--enable-online-monitor", action="store_true",
+                      help="Enable the online anomaly monitor (detects unknown/new patterns)")
+    parser.add_argument("--online-threshold", type=float, default=0.5,
+                      help="Alert threshold for online anomaly score (0-1) [default: 0.5]")
+    parser.add_argument("--online-warmup-windows", type=int, default=10,
+                      help="Normal windows needed before online scoring starts [default: 10]")
     parser.add_argument("--debug", action="store_true",
                       help="Enable DEBUG logging")
 
@@ -241,6 +259,9 @@ def main():
         scaler_path=args.scaler,
         window_size=args.window_size,
         burst_threshold=args.burst_threshold,
+        enable_online_monitor=args.enable_online_monitor,
+        online_threshold=args.online_threshold,
+        online_warmup_windows=args.online_warmup_windows,
     )
 
 

@@ -101,6 +101,13 @@ BURST_EXFIL_THRESHOLD = 0.7  # alert if score > 0.7
 SCALER_PATH = MODEL_DIR / "scaler.pkl"
 
 # =============================================================================
+# ONLINE ANOMALY MONITOR CONFIG
+# =============================================================================
+ENABLE_ONLINE_MONITOR    = False        # Disabled by default (opt-in via CLI)
+ONLINE_THRESHOLD         = 0.5          # Alert fires when online_score >= threshold
+ONLINE_WARMUP_WINDOWS    = 10           # Normal windows needed before scoring starts
+
+# =============================================================================
 # LOGGING CONFIG
 # =============================================================================
 LOG_FILE    = PROJECT_ROOT / "exfil_detection.log"

@@ -1,6 +1,7 @@
 """
 src/inference/model_inference.py — Thread 3: Model Inference + Alert Logging.
-Loads model at startup, predicts per window, computes burst_exfil_score, logs alerts.
+Loads model at startup, predicts per window, computes burst_exfil_score,
+evaluates online anomaly monitor, logs alerts.
 """
 
 import threading
@@ -8,13 +9,17 @@ import time
 import logging
 import queue
 import numpy as np
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from src.inference.model_loader import ModelLoader
 from src.inference.alert_logger import AlertLogger
+from src.inference.online_anomaly_monitor import OnlineAnomalyMonitor
 from src.features.burst_exfil import burst_exfil_score, get_severity
 from src.features.runtime_features import build_runtime_feature_vector
-from src.utils.config import MODEL_DIR, BURST_EXFIL_THRESHOLD, SCALER_PATH
+from src.utils.config import (
+    MODEL_DIR, BURST_EXFIL_THRESHOLD, SCALER_PATH,
+    ENABLE_ONLINE_MONITOR, ONLINE_THRESHOLD, ONLINE_WARMUP_WINDOWS,
+)
 from src.utils.helpers import get_logger
 
 logger = get_logger("inference")
@@ -45,6 +50,9 @@ class InferenceThread(threading.Thread):
         model_path: Optional[str] = None,
         scaler_path: Optional[str] = None,
         burst_threshold: float = BURST_EXFIL_THRESHOLD,
+        enable_online_monitor: bool = ENABLE_ONLINE_MONITOR,
+        online_threshold: float = ONLINE_THRESHOLD,
+        online_warmup_windows: int = ONLINE_WARMUP_WINDOWS,
     ):
         super().__init__(name="Inference", daemon=True)
         self.feature_queue = feature_queue
@@ -57,9 +65,22 @@ class InferenceThread(threading.Thread):
         self.alert_logger = AlertLogger(console_color=True)
         self._model_skip_logged = False
 
+        # Online anomaly monitor (detects unknown/new patterns)
+        self.online_monitor = OnlineAnomalyMonitor(
+            enabled=enable_online_monitor,
+            online_threshold=online_threshold,
+            warmup_min_windows=online_warmup_windows,
+        )
+        if enable_online_monitor:
+            logger.info(
+                f"[INFERENCE] Online anomaly monitor ENABLED "
+                f"(threshold={online_threshold}, warmup={online_warmup_windows})"
+            )
+
         self.stats = {
             "windows_processed": 0,
             "alerts_triggered": 0,
+            "online_anomalies": 0,
             "start_time": None,
         }
         self._lock = threading.Lock()
@@ -169,15 +190,33 @@ class InferenceThread(threading.Thread):
         # 1. Compute burst_exfil_score
         score = burst_exfil_score(features)
         severity = get_severity(score)
+        burst_triggered = score > self.burst_threshold
 
-        # 2. Runtime model prediction when the loaded model is compatible with
-        # live packet-window features. CICFlowMeter-trained DL models are still
-        # skipped because their 67-feature input space does not match.
+        # 2. Runtime model prediction
         model_score, prediction = self._predict_runtime_window(features)
+        model_triggered = prediction == 1
 
-        # 3. Determine if alert should fire
-        alert_fired = score > self.burst_threshold or prediction == 1
-        if prediction == 1 and score < 0.70:
+        # 3. Online anomaly monitor (unknown/new pattern detection)
+        online_result = self.online_monitor.evaluate(features)
+        online_score = online_result.get("online_score", 0.0)
+        online_pred = online_result.get("online_prediction", 0)
+        online_triggered = online_pred == 1
+        if online_triggered:
+            self.stats["online_anomalies"] += 1
+
+        # 4. Determine alert triggers and severity
+        alert_triggers: List[str] = []
+        if burst_triggered:
+            alert_triggers.append("BURST_RULE")
+        if model_triggered:
+            alert_triggers.append("OFFLINE_MODEL")
+        if online_triggered:
+            alert_triggers.append("ONLINE_UNKNOWN_ANOMALY")
+
+        alert_fired = bool(alert_triggers)
+
+        # Upgrade severity if model or online fires without burst
+        if not burst_triggered and (model_triggered or online_triggered):
             severity = "MEDIUM"
 
         if alert_fired:
@@ -188,6 +227,11 @@ class InferenceThread(threading.Thread):
                 model_score=model_score,
                 prediction=prediction,
                 severity=severity,
+                online_score=online_score,
+                online_prediction=online_pred,
+                online_reason_codes=online_result.get("reason_codes"),
+                baseline_count=online_result.get("baseline_count"),
+                alert_triggers=alert_triggers,
             )
         else:
             self.alert_logger.log_info(features=features, burst_score=score)
@@ -278,4 +322,6 @@ class InferenceThread(threading.Thread):
         with self._lock:
             stats = self.stats.copy()
         stats["alert_summary"] = self.alert_logger.summary()
+        stats["online_monitor_stats"] = self.online_monitor.get_stats()
+        stats["online_baselines_active"] = self.online_monitor.baseline_count()
         return stats

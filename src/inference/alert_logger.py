@@ -7,7 +7,9 @@ import os
 import time
 import urllib.parse
 import urllib.request
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+
+from src.utils.config import PROJECT_ROOT
 
 # ANSI color codes
 RED    = "\033[91m"
@@ -32,6 +34,18 @@ SEVERITY_COLORS = {
 SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
 
 
+def load_alert_env():
+    """Load local alert secrets from ignored env files if python-dotenv exists."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+
+    # Keep exported shell variables higher priority than local files.
+    load_dotenv(PROJECT_ROOT / ".env", override=False)
+    load_dotenv(PROJECT_ROOT / ".env.local", override=False)
+
+
 def format_alert(
     features: Dict[str, Any],
     burst_score: float,
@@ -39,6 +53,11 @@ def format_alert(
     prediction: Optional[int] = None,
     severity: str = "HIGH",
     color: bool = True,
+    online_score: Optional[float] = None,
+    online_prediction: Optional[int] = None,
+    online_reason_codes: Optional[List[str]] = None,
+    baseline_count: Optional[int] = None,
+    alert_triggers: Optional[List[str]] = None,
 ) -> str:
     """
     Format a detection alert for console and log output.
@@ -75,6 +94,19 @@ def format_alert(
     lines.append(f"{c}  Session len:  {features.get('window_duration', 0):.1f}s")
 
     # Score breakdown
+    # Alert triggers
+    if alert_triggers:
+        lines.append(f"{c}{b}  ── Triggers ──{r}")
+        trigger_labels = {
+            "BURST_RULE": "Burst exfil score",
+            "OFFLINE_MODEL": "Offline model",
+            "ONLINE_UNKNOWN_ANOMALY": "Online anomaly (unknown pattern)",
+        }
+        for t in alert_triggers:
+            label = trigger_labels.get(t, t)
+            lines.append(f"{c}  [{t}] {label}")
+
+    # Score breakdown
     lines.append(f"{c}{b}  ── Scores ──{r}")
     lines.append(f"{c}  Burst score:   {b}{burst_score:.3f}{r}")
     if model_score is not None:
@@ -82,6 +114,14 @@ def format_alert(
     if prediction is not None:
         pred_str = "EXFILTRATION" if prediction == 1 else "NORMAL"
         lines.append(f"{c}  Prediction:    {b}{pred_str}{r}")
+    if online_score is not None:
+        online_pred_str = "ANOMALY" if online_prediction == 1 else "NORMAL"
+        lines.append(f"{c}  Online score:  {b}{online_score:.3f}{r}  ({online_pred_str})")
+        if baseline_count is not None:
+            lines.append(f"{c}  Baseline n:   {baseline_count}")
+        if online_reason_codes:
+            for code in online_reason_codes[:5]:
+                lines.append(f"{c}    {DIM}{code}{r}")
 
     lines.append(f"{c}{b}━━━━━━━━━━━━━━━━━━━━━━━━{r}")
 
@@ -113,6 +153,9 @@ def format_telegram_alert(
     model_score: Optional[float] = None,
     prediction: Optional[int] = None,
     severity: str = "HIGH",
+    online_score: Optional[float] = None,
+    online_prediction: Optional[int] = None,
+    online_reason_codes: Optional[List[str]] = None,
 ) -> str:
     """Format metadata-only alert text for Telegram."""
     lines = [
@@ -134,6 +177,11 @@ def format_telegram_alert(
         lines.append(f"Model score: {model_score:.3f}")
     if prediction is not None:
         lines.append(f"Prediction: {'EXFILTRATION' if prediction == 1 else 'NORMAL'}")
+    if online_score is not None:
+        lines.append(f"Online score: {online_score:.3f} ({'ANOMALY' if online_prediction == 1 else 'NORMAL'})")
+        if online_reason_codes:
+            for code in online_reason_codes[:3]:
+                lines.append(f"  {code}")
     lines.append("Payload content was not included.")
     return "\n".join(lines)
 
@@ -144,7 +192,14 @@ class AlertLogger:
     """
 
     def __init__(self, console_color: bool = True):
+        load_alert_env()
         self.logger = logging.getLogger("exfil.alerts")
+        self.logger.propagate = False
+        # Forward file handlers from root so alerts still reach exfil_detection.log
+        root = logging.getLogger()
+        for h in root.handlers:
+            if isinstance(h, logging.FileHandler) and h not in self.logger.handlers:
+                self.logger.addHandler(h)
         self.console_color = console_color
         self.alert_count = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
         self.total_checked = 0
@@ -165,6 +220,11 @@ class AlertLogger:
         model_score: Optional[float] = None,
         prediction: Optional[int] = None,
         severity: str = "HIGH",
+        online_score: Optional[float] = None,
+        online_prediction: Optional[int] = None,
+        online_reason_codes: Optional[List[str]] = None,
+        baseline_count: Optional[int] = None,
+        alert_triggers: Optional[List[str]] = None,
     ):
         """Log a detection alert (both file and console)."""
         self.total_checked += 1
@@ -173,17 +233,33 @@ class AlertLogger:
         msg = format_alert(
             features, burst_score, model_score, prediction, severity,
             color=self.console_color,
+            online_score=online_score,
+            online_prediction=online_prediction,
+            online_reason_codes=online_reason_codes,
+            baseline_count=baseline_count,
+            alert_triggers=alert_triggers,
         )
 
         # File log (no color)
-        file_msg = format_alert(features, burst_score, model_score, prediction, severity, color=False)
+        file_msg = format_alert(
+            features, burst_score, model_score, prediction, severity, color=False,
+            online_score=online_score,
+            online_prediction=online_prediction,
+            online_reason_codes=online_reason_codes,
+            baseline_count=baseline_count,
+            alert_triggers=alert_triggers,
+        )
         self.logger.warning(file_msg)
 
         # Console (with color)
         print(msg)
 
         # Optional Telegram notification (metadata only, no payload content)
-        self._send_telegram_alert(features, burst_score, model_score, prediction, severity)
+        self._send_telegram_alert(
+            features, burst_score, model_score, prediction, severity,
+            online_score=online_score, online_prediction=online_prediction,
+            online_reason_codes=online_reason_codes,
+        )
 
     def log_info(self, features: Dict[str, Any], burst_score: float):
         """Log a normal traffic window — silent (no per-window output to avoid console spam)."""
@@ -208,6 +284,9 @@ class AlertLogger:
         model_score: Optional[float],
         prediction: Optional[int],
         severity: str,
+        online_score: Optional[float] = None,
+        online_prediction: Optional[int] = None,
+        online_reason_codes: Optional[List[str]] = None,
     ):
         """Send a best-effort Telegram alert if configured."""
         if not self.telegram_enabled:
@@ -215,7 +294,11 @@ class AlertLogger:
         if not self.telegram_token or not self.telegram_chat_id:
             return
 
-        text = format_telegram_alert(features, burst_score, model_score, prediction, severity)
+        text = format_telegram_alert(
+            features, burst_score, model_score, prediction, severity,
+            online_score=online_score, online_prediction=online_prediction,
+            online_reason_codes=online_reason_codes,
+        )
         api_url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
         body = urllib.parse.urlencode({
             "chat_id": self.telegram_chat_id,

@@ -1,0 +1,81 @@
+# lab/docker-compose.yml — Exfiltration Detection Lab
+#
+# Architecture:
+#   victim-client  → exfil-server   (HTTP POST uploads)
+#   monitor-detector → captures traffic (mirror port or shared network)
+#
+# WARNING: This lab runs ONLY in an isolated local environment.
+# Do NOT expose exfil-server to the internet.
+
+services:
+  # --------------------------------------------------------------------------
+  # exfil-server — HTTP receiver (logs metadata only, no content storage)
+  # --------------------------------------------------------------------------
+  exfil-server:
+    image: python:3.11-slim
+    container_name: exfil-server
+    hostname: exfil-server
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./server/receiver.py:/receiver.py:ro
+    command: >
+      python3 -c "
+        import logging, sys
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s [%(levelname)s] %(message)s',
+            stream=sys.stdout
+        );
+        exec(open('/receiver.py').read())
+      "
+    networks:
+      exfil-lab:
+    healthcheck:
+      test: python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/browse', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # --------------------------------------------------------------------------
+  # victim-client — generates synthetic HTTP traffic
+  # --------------------------------------------------------------------------
+  victim-client:
+    image: python:3.11-slim
+    container_name: victim-client
+    hostname: victim-client
+    volumes:
+      - ./victim/generate_http_traffic.py:/generate.py:ro
+    depends_on:
+      exfil-server:
+        condition: service_healthy
+    networks:
+      exfil-lab:
+    # Default: sleep forever (use docker compose run to execute specific modes)
+    command: ["sleep", "infinity"]
+
+  # --------------------------------------------------------------------------
+  # monitor-detector — runs the detection pipeline on captured traffic
+  # --------------------------------------------------------------------------
+  monitor-detector:
+    build:
+      context: ../..
+      dockerfile: lab/monitor/Dockerfile
+    container_name: monitor-detector
+    hostname: monitor-detector
+    volumes:
+      - ../../src:/app/src:ro
+      - ../../models:/app/models:ro
+      - ../../lab/captures:/app/lab/captures:rw
+    environment:
+      - PYTHONUNBUFFERED=1
+    networks:
+      exfil-lab:
+    command: ["sleep", "infinity"]
+
+networks:
+  exfil-lab:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
