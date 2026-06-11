@@ -59,14 +59,14 @@ services:
   # --------------------------------------------------------------------------
   monitor-detector:
     build:
-      context: ../..
+      context: ..
       dockerfile: lab/monitor/Dockerfile
     container_name: monitor-detector
     hostname: monitor-detector
     volumes:
-      - ../../src:/app/src:ro
-      - ../../models:/app/models:ro
-      - ../../lab/captures:/app/lab/captures:rw
+      - ../src:/app/src:ro
+      - ../models:/app/models:ro
+      - ./captures:/app/lab/captures:rw
     environment:
       - PYTHONUNBUFFERED=1
     networks:
