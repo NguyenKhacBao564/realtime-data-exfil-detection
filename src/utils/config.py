@@ -91,8 +91,7 @@ FEATURE_QUEUE_SIZE     = 10000   # max windows in queue
 CAPTURE_IFACE  = None          # None = offline mode (PCAP)
 OFFLINE_MODE    = True          # True = read PCAP, False = live interface
 HTTP_PORTS      = [80, 443, 8000, 8080, 8443]
-COMMON_PORTS    = [53, 80, 443, 22, 123, 137, 389, 88, 21, 465, 3268, 139, 445, 135, 8080, 8443]
-
+COMMON_PORTS = [53, 80, 443, 22, 123, 137, 389, 88, 21, 465, 3268, 139, 445, 135, 8000, 8080, 8443]
 # =============================================================================
 # INFERENCE CONFIG
 # =============================================================================
